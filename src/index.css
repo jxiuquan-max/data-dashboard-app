@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+/* AI 数据协作舱 - 清爽明亮系统 */
+:root {
+  --bg-page: #f8fafc;
+  --bg-card: #ffffff;
+  --bg-header: #ffffff;
+  --bg-hover: #f1f5f9;
+  --border: #e2e8f0;
+  --text-primary: #1e293b;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --accent: #0ea5e9;
+  --accent-rgb: 14, 165, 233;
+  --warning: #f59e0b;
+  --graphite: #f1f5f9;
+  --graphite-light: #e2e8f0;
+  --radius: 10px;
+  --radius-sm: 6px;
+  --radius-lg: 14px;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--bg-page);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: rgba(14, 165, 233, 0.2);
+  color: var(--text-primary);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button {
+  font-family: inherit;
+}
+
+input,
+select {
+  font-family: inherit;
+}
+
+/* 统一按钮与气泡 */
+.btn-primary {
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.btn-primary:hover { filter: brightness(1.1); }
+.btn-primary:active { filter: brightness(0.95); }
+.bubble, .ai-companion-bubble {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+.ai-controller button[type="button"]:hover { filter: brightness(1.1); }
+.ai-controller button[type="button"]:active { filter: brightness(0.95); }

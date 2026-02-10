@@ -1,0 +1,87 @@
+.operation-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.panel-title {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.op-group {
+  margin-bottom: 14px;
+}
+
+.op-group label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.op-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.op-row input[type="text"],
+.op-row input[type="number"],
+.op-row select {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  min-width: 80px;
+}
+
+.op-row button {
+  padding: 6px 12px;
+  font-size: 13px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.op-row button:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.op-row button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.formula-section {
+  border-left: 3px solid var(--accent);
+  padding-left: 12px;
+}
+
+.merge-section .btn-merge {
+  background: linear-gradient(135deg, var(--accent) 0%, #3b82f6 100%);
+  font-weight: 600;
+}
+
+.more-ops-toggle .btn-toggle {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-header);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.more-ops-toggle .btn-toggle:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}

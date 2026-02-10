@@ -1,0 +1,66 @@
+.replay-panel {
+  background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-header) 100%);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb, 59, 130, 246), 0.1);
+}
+
+.replay-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.replay-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.replay-progress {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.replay-next {
+  padding: 6px 12px;
+  font-size: 12px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.replay-next:hover {
+  filter: brightness(1.1);
+}
+
+.replay-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 120px;
+  overflow-y: auto;
+  font-size: 13px;
+  font-family: ui-monospace, monospace;
+}
+
+.replay-log-msg {
+  color: var(--text-secondary);
+  padding: 2px 0;
+}
+
+.replay-log-step {
+  color: var(--text-primary);
+  padding: 2px 0;
+  padding-left: 8px;
+  border-left: 3px solid var(--accent);
+  margin: 4px 0;
+}

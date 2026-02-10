@@ -1,0 +1,534 @@
+/* 整体：左右结构，左侧操作、右侧预览（预览区最小约为左侧 2 倍宽） */
+.guided-merge-view {
+  display: grid;
+  grid-template-columns: minmax(320px, 420px) minmax(840px, 1fr);
+  gap: 20px;
+  padding: 20px;
+  margin: 0 auto;
+  max-width: 2200px;
+  min-height: calc(100vh - 80px);
+  align-items: stretch;
+}
+
+@media (max-width: 900px) {
+  .guided-merge-view {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+}
+
+.guided-left {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.guided-right {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.guided-right .guided-table-section {
+  flex: 1;
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 预览区表格容器：全部展示，内部滚动 */
+.guided-table-scroll {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-header);
+}
+
+.guided-table-scroll .data-table-wrap {
+  min-width: min-content;
+}
+
+.guided-merge-view h3 {
+  margin: 0 0 12px 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.guided-upload-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.guided-upload-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.guided-upload-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 20px;
+  font-size: 14px;
+  background: var(--accent);
+  color: white;
+  border-radius: 8px;
+  cursor: pointer;
+  border: none;
+}
+
+.guided-upload-btn input {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+}
+
+.guided-upload-btn:hover {
+  filter: brightness(1.1);
+}
+
+.guided-upload-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.guided-upload-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.guided-upload-list li .meta {
+  color: var(--text-muted);
+  margin-left: 8px;
+}
+
+.guided-upload-list li button {
+  margin-left: auto;
+  padding: 4px 10px;
+  font-size: 12px;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.guided-upload-list li button:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.guided-check-update-btn {
+  margin-top: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  background: var(--bg-header);
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.guided-check-update-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
+.guided-check-update-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.guided-source-update-reminder {
+  padding: 14px 16px;
+  background: linear-gradient(135deg, rgba(88, 166, 255, 0.12) 0%, var(--bg-card) 100%);
+  border: 2px solid var(--accent);
+  border-radius: 8px;
+}
+
+.guided-source-update-title {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.guided-source-update-desc {
+  margin: 0 0 10px 0;
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.guided-source-update-list {
+  margin: 0 0 12px 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.guided-source-update-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.guided-upload-error {
+  margin: 8px 0 0 0;
+  font-size: 12px;
+  color: #f97583;
+}
+
+.guided-conversation-section {
+  flex: 1;
+  min-height: 280px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  position: relative;
+}
+
+.guided-messages {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 8px 0;
+  min-height: 0;
+}
+
+/* 操作区始终贴在对话区底部，避免被滚动出视野 */
+.guided-pending-sticky {
+  flex-shrink: 0;
+  margin-top: 12px;
+  padding-top: 12px;
+  padding-bottom: 4px;
+  border-top: 2px solid var(--accent);
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--bg-card);
+  z-index: 2;
+}
+
+.guided-pending-label {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.guided-pending-label::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: guided-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes guided-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.2); }
+}
+
+.guided-placeholder {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.guided-msg {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.guided-msg-ai .guided-msg-avatar {
+  background: var(--accent);
+  color: white;
+}
+
+.guided-msg-user .guided-msg-avatar {
+  background: var(--bg-header);
+  color: var(--text-secondary);
+}
+
+.guided-msg-avatar {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.guided-msg-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.guided-msg-text {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.guided-msg-meta {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: var(--bg-header);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.guided-pending {
+  margin-top: 0;
+  padding: 16px;
+  background: linear-gradient(180deg, var(--bg-header) 0%, var(--bg-card) 100%);
+  border: 2px solid var(--accent);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(88, 166, 255, 0.2);
+}
+
+.guided-confirm-card {
+  padding: 0;
+}
+
+.guided-confirm-title {
+  margin: 0 0 12px 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.guided-confirm-hint {
+  margin: 0 0 12px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.guided-confirm-card p {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.guided-issue-list {
+  margin: 0 0 12px 0;
+  padding-left: 20px;
+  font-size: 14px;
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+
+.guided-issue-desc {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.guided-guidance {
+  margin: 0 0 14px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.guided-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.guided-confirm-actions button,
+.guided-btn-action {
+  padding: 14px 24px;
+  font-size: 15px;
+  font-weight: 600;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  min-height: 48px;
+  min-width: 110px;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+
+.guided-btn-action:hover {
+  background: var(--bg-hover);
+  border-color: var(--text-muted);
+  transform: translateY(-1px);
+}
+
+.guided-btn-action.primary {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+  min-width: 130px;
+  box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.35);
+}
+
+.guided-btn-action.primary:hover {
+  filter: brightness(1.15);
+  box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.45);
+}
+
+.guided-confirm-clean .guided-confirm-actions .guided-btn-action {
+  min-width: 140px;
+}
+
+.guided-single-step .guided-confirm-actions .guided-btn-action.primary {
+  min-width: 130px;
+}
+
+/* 逐项引导卡片：左侧强调条，突出“当前项” */
+.guided-confirm-card.guided-single-step {
+  padding-left: 14px;
+  border-left: 4px solid var(--accent);
+  margin-left: 2px;
+}
+
+.guided-confirm-primary {
+  margin-bottom: 10px;
+}
+
+.guided-confirm-secondary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+.guided-btn-link {
+  background: none;
+  border: none;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.guided-btn-link:hover {
+  color: var(--text-primary);
+  background: rgba(var(--accent-rgb), 0.12);
+}
+
+.guided-confirm-sep {
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.guided-join-row,
+.guided-fill-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.guided-join-row label,
+.guided-fill-row label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.guided-join-row select,
+.guided-fill-row input {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.guided-join-row button,
+.guided-fill-row button {
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: 500;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.guided-fill-row input {
+  flex: 1;
+  min-width: 120px;
+}
+
+.guided-table-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.guided-table-section .guided-table-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.guided-preview-placeholder {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 14px;
+  margin: 0;
+  padding: 32px;
+  text-align: center;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--bg-header);
+}
