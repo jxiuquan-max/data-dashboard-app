@@ -1,0 +1,9 @@
+# Query: const BACKEND_PORT = 5001;
+# ContextLines: 1
+
+1 个结果 - 1 个文件
+
+my-clean-demo • src/components/BackendStatus.tsx:
+  8  const API_BASE = import.meta.env.VITE_API_URL ?? '';
+  9: const BACKEND_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:5001";
+  10  
