@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "dev:fresh": "node -e \"require('fs').rmSync('node_modules/.vite',{recursive:true,force:true})\" && vite",
-    "build": "tsc -b && vite build",
+    "build": "vite build",
     "preview": "vite preview",
     "backend": "uvicorn main:app --reload --host 0.0.0.0 --port 5001"
   },
