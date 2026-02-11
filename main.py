@@ -26,12 +26,25 @@ app = FastAPI(title="Merge & Health Scan API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=["*"],  # 允许所有来源，这样 Render 上的前端才能连上
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# --- 💡 新增：健康检查和状态查询接口 ---
+
+@app.get("/health")
+def health_check():
+    """让前端知道后端大脑还活着"""
+    return {"status": "ok"}
+
+@app.get("/check-status")
+def check_status():
+    """让前端知道后端现在是否空闲"""
+    return {"status": "idle"}
+
+# --- 👆 粘贴结束 ---
 # 当前处理文件的指纹（merge-and-scan 成功后更新），供 /api/check-status 对比
 _last_merge_fingerprint: str | None = None
 

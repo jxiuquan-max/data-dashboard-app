@@ -5,7 +5,18 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle, XCircle } from 'lucide-react';
 
-const API_BASE = import.meta.env.VITE_API_URL ?? '';
+// 1. 获取你在 Render 配置的环境变量（注意：名字必须和你 Render 设置的一致）
+// 你在 Render 填的是 VITE_API_BASE_URL，所以这里也要改
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
+
+// 2. 识别当前环境：是开发模式(dev)还是生产模式(prod)
+const isProd = import.meta.env.PROD;
+
+// 3. 动态确定后端连接地址
+// 如果是线上，优先用 API_BASE；如果是本地，死磕 5001
+const FINAL_API_URL = isProd ? API_BASE : "http://127.0.0.1:5001";
+
+// 在第 18 行添加这一行，消除红线
 const BACKEND_PORT = 5001;
 
 export function BackendStatus() {
@@ -14,7 +25,7 @@ export function BackendStatus() {
   useEffect(() => {
     let cancelled = false;
     setStatus('checking');
-    fetch(`${API_BASE}/api/health`)
+    fetch(`${FINAL_API_URL}/health`)
       .then((res) => {
         if (cancelled) return;
         setStatus(res.ok ? 'ok' : 'fail');
@@ -39,7 +50,8 @@ export function BackendStatus() {
     return (
       <p className="flex items-center gap-1.5 text-xs text-emerald-400">
         <CheckCircle className="h-3.5 w-3.5" aria-hidden />
-        后端已连接（端口 {BACKEND_PORT}），可上传 CSV
+        {/* 将第 50 行修改为 */}
+        后端已连接 {isProd ? '(云端)' : '(端口 5001)'}
       </p>
     );
   }
