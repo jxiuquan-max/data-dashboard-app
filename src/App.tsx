@@ -21,7 +21,12 @@ import { RuleReview, type MergeSummary } from './components/RuleReview';
 import { AnalysisPlanner } from './components/AnalysisPlanner';
 import './App.css';
 
-const API_BASE = import.meta.env.VITE_API_URL ?? '';
+// --- 💡 粘贴这一段到 App.tsx 顶部 ---
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
+const isProd = import.meta.env.PROD;
+const FINAL_API_URL = isProd ? API_BASE : "http://127.0.0.1:5001";
+// --- 粘贴结束 ---
+
 const UPLOAD_TIMEOUT_MS = 60000;
 
 const emptyManifest: HealthManifest = {
@@ -120,7 +125,7 @@ export default function App() {
     setConfirmMergeError(null);
     setConfirmAlignLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/propose-rules`, {
+      const res = await fetch(`${FINAL_API_URL}/propose-rules`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ base_columns: params.baseline_columns }),
@@ -143,7 +148,7 @@ export default function App() {
     setConfirmMergeError(null);
     setConfirmAlignLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/propose-rules`, {
+      const res = await fetch(`${FINAL_API_URL}/propose-rules`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ base_columns: headerReport.base_columns }),
@@ -180,7 +185,7 @@ export default function App() {
       }
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
-      const res = await fetch(`${API_BASE}/api/merge-and-scan`, {
+      const res = await fetch(`${FINAL_API_URL}/merge-and-scan`, {
         method: 'POST',
         body: form,
         signal: controller.signal,
@@ -201,7 +206,7 @@ export default function App() {
           ? e.name === 'AbortError'
             ? '请求超时，请重试'
             : e.message.toLowerCase().includes('fetch') || e.message.toLowerCase().includes('econnrefused')
-              ? '无法连接后端，请确认 uvicorn main:app --port 5001 已启动'
+              ? `无法连接后端，请确认后端服务已启动 ${isProd ? '(云端)' : '(端口 5001)'}`
               : e.message
           : '合并与扫描失败';
       setConfirmMergeError(msg);
@@ -234,7 +239,7 @@ export default function App() {
         form.append('template_incremental', params.template_incremental ? 'true' : 'false');
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
-        const res = await fetch(`${API_BASE}/api/merge-and-scan`, {
+        const res = await fetch(`${FINAL_API_URL}/merge-and-scan`, {
           method: 'POST',
           body: form,
           signal: controller.signal,
@@ -255,7 +260,7 @@ export default function App() {
             ? e.name === 'AbortError'
               ? '请求超时，请重试'
               : e.message.toLowerCase().includes('fetch') || e.message.toLowerCase().includes('econnrefused')
-                ? '无法连接后端，请确认 uvicorn main:app --port 5001 已启动'
+                ? `无法连接后端，请确认后端服务已启动 ${isProd ? '(云端)' : '(端口 5001)'}`
                 : e.message
             : '合并与扫描失败';
         setConfirmMergeError(msg);
@@ -291,7 +296,7 @@ export default function App() {
     if (lastFingerprint == null) return;
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/check-status`);
+        const res = await fetch(`${FINAL_API_URL}/check-status`);
         if (!res.ok) return;
         const data = (await res.json()) as { fingerprint?: string | null };
         if (data.fingerprint != null && data.fingerprint !== lastFingerprint) {
@@ -321,7 +326,7 @@ export default function App() {
       }
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
-      const res = await fetch(`${API_BASE}/api/merge-and-scan`, {
+      const res = await fetch(`${FINAL_API_URL}/merge-and-scan`, {
         method: 'POST',
         body: form,
         signal: controller.signal,
