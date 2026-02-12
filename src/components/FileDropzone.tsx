@@ -10,7 +10,6 @@ import type { HealthManifest } from '../DataFixer';
 import type { MergedData } from '../DataFixer';
 import type { SchemaReport } from '../types/schemaReport';
 
-const API_BASE = import.meta.env.VITE_API_URL ?? '';
 const UPLOAD_TIMEOUT_MS = 60000;
 
 export interface MergeScanResult {
@@ -32,6 +31,13 @@ export interface FileDropzoneProps {
   accept?: string;
   disabled?: boolean;
 }
+
+// 1. 获取环境变量
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
+const isProd = import.meta.env.PROD;
+
+// 2. 确定最终地址
+const FINAL_API_URL = isProd ? API_BASE : "http://127.0.0.1:5001";
 
 export function FileDropzone({
   onHeaderResult,
@@ -61,7 +67,9 @@ export function FileDropzone({
         csvs.forEach((f) => form.append('files', f));
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
-        const res = await fetch(`${API_BASE}/api/analyze-headers`, {
+        // 1. 换成 FINAL_API_URL (确保本地/云端都能自动识别)
+        // 2. 删掉 /api (因为你的 Python 后端没写这个前缀，这就是导致 404 的原因)
+        const res = await fetch(`${FINAL_API_URL}/analyze-headers`, {
           method: 'POST',
           body: form,
           signal: controller.signal,
@@ -89,7 +97,7 @@ export function FileDropzone({
                   e.message.toLowerCase().includes('failed') ||
                   e.message.toLowerCase().includes('network') ||
                   e.message.toLowerCase().includes('econnrefused')
-                ? '无法连接后端。请先启动：uvicorn main:app --port 5001（若端口被占用，见下方说明）'
+                  ? `无法连接后端。请确认后端服务已启动 ${isProd ? '(云端)' : '(端口 5001)'}，然后刷新本页或点击上传区域重试`
                 : e.message
             : '表头分析失败，请重试';
         setError(msg);

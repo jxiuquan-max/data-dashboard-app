@@ -3,7 +3,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { CheckCircle, XCircle } from 'lucide-react';
+import { CheckCircle } from 'lucide-react';
 
 // 1. 获取你在 Render 配置的环境变量（注意：名字必须和你 Render 设置的一致）
 // 你在 Render 填的是 VITE_API_BASE_URL，所以这里也要改
