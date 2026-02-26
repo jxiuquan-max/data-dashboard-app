@@ -16,6 +16,8 @@ export interface MergeScanResult {
   schema_report: SchemaReport;
   health_manifest: HealthManifest;
   merged: MergedData;
+  /** 合并后的行数据（部分后端返回 merged_data 而非 merged.rows） */
+  merged_data?: Record<string, string | null>[];
   /** 合并后后端返回的指纹，供 check-status 轮询对比 */
   fingerprint?: string | null;
 }

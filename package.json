@@ -11,19 +11,21 @@
     "backend": "uvicorn main:app --reload --host 0.0.0.0 --port 5001"
   },
   "dependencies": {
+    "ag-grid-community": "^35.1.0",
+    "ag-grid-react": "^35.1.0",
     "framer-motion": "^11.11.0",
     "lucide-react": "^0.460.0",
-    "recharts": "^2.15.0",
-    "react-window": "^1.8.10",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-window": "^1.8.10",
+    "recharts": "^2.15.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
     "@types/react": "^18.2.0",
-    "@types/react-window": "^1.8.8",
     "@types/react-dom": "^18.2.0",
+    "@types/react-window": "^1.8.8",
     "@vitejs/plugin-react": "^4.2.0",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.2.0",

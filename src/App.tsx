@@ -4,21 +4,23 @@
  * 每个确认环节均有 AI 详细解释（AIChatBanner + generateAIMessage）。
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LayoutDashboard } from 'lucide-react';
-import { FileDropzone, type MergeScanResult } from './components/FileDropzone';
-import { MergeDecisionCenter, type StructureConfirmParams } from './components/MergeDecisionCenter';
-import { HeaderPreview } from './components/HeaderPreview';
-import { BackendStatus } from './components/BackendStatus';
+import type { MergeScanResult } from './components/FileDropzone';
+import type { StructureConfirmParams } from './components/MergeDecisionCenter';
 import { DataFixer } from './DataFixer';
 import { Dashboard } from './pages/Dashboard';
 import { ExportModule } from './components/ExportModule';
 import { AIChatBanner, type FlowStep } from './components/AIChatBanner';
 import type { HealthManifest, MergedData, HealthError } from './DataFixer';
 import type { HeaderAnalyzeResult, ScanRules, ProposeRulesResult, MergeStrategy } from './types/schemaReport';
-import { RuleReview, type MergeSummary } from './components/RuleReview';
 import { AnalysisPlanner } from './components/AnalysisPlanner';
+import DataCanvas from './components/DataCanvas';
+import { AgentSidebar, type AgentTask } from './components/AgentSidebar';
+import { DEFAULT_BASE_DATA } from './constants/defaultData';
+import { parseCsvFromFile } from './utils/parseCsv';
+import type { SavedSkill } from './types/skill';
 import './App.css';
 
 // --- 💡 粘贴这一段到 App.tsx 顶部 ---
@@ -52,9 +54,10 @@ const stepTransition = {
 };
 
 export default function App() {
-  const [currentStep, setCurrentStep] = useState<FlowStep | 'dashboard'>('idle');
+  const [currentStep, setCurrentStep] = useState<FlowStep | 'dashboard' | 'canvas'>('canvas');
   const [mergeResult, setMergeResult] = useState<MergeScanResult | null>(null);
-  const [fixerRows, setFixerRows] = useState<Record<string, string | null>[]>([]);
+  /** 统一数据源：画布与侧边栏共用 fixerRows，默认使用产品销售统计表 */
+  const [fixerRows, setFixerRows] = useState<Record<string, string | null>[]>(DEFAULT_BASE_DATA);
   const [remainingErrorCount, setRemainingErrorCount] = useState(0);
   const [activeError, setActiveError] = useState<HealthError | null>(null);
   const [headerReport, setHeaderReport] = useState<HeaderAnalyzeResult | null>(null);
@@ -68,7 +71,7 @@ export default function App() {
   /** 结构确认后保存的合并参数，规则确认时用于调用 merge-and-scan */
   const [structureParams, setStructureParams] = useState<StructureConfirmParams | null>(null);
   /** preview 流程中用户选择的多余列处理：扩展（基准左连接）或丢弃 */
-  const [alignExtendExtra, setAlignExtendExtra] = useState(false);
+  const [alignExtendExtra] = useState(false);
   /** 上次合并返回的指纹，用于 check-status 轮询对比 */
   const [lastFingerprint, setLastFingerprint] = useState<string | null>(null);
   /** 轮询发现后端指纹与本地不一致时置为 true，AIChatBanner 显示「源文档已更新」 */
@@ -77,19 +80,22 @@ export default function App() {
   const [ignoredSignatures, setIgnoredSignatures] = useState<Array<{ col_name: string; value: string | null }>>([]);
   /** 同步更新完成后在 AnalysisPlanner 显示一次「数据已刷新」提示 */
   const [syncJustDone, setSyncJustDone] = useState(false);
-
-  /** 规则步展示的合并效果小结：新增列数、保持行数（由 headerReport + structureParams/alignExtendExtra 计算） */
-  const rulesMergeSummary = useMemo((): MergeSummary | null => {
-    if (!headerReport?.files?.length) return null;
-    const keptRows = headerReport.files[0]?.row_count ?? 0;
-    const templateIncremental = structureParams?.template_incremental ?? alignExtendExtra;
-    if (!templateIncremental) {
-      return { newColumns: 0, keptRows };
-    }
-    const extraSet = new Set<string>();
-    headerReport.files.slice(1).forEach((f) => (f.extra_columns ?? []).forEach((c) => extraSet.add(c)));
-    return { newColumns: extraSet.size, keptRows };
-  }, [headerReport, structureParams?.template_incremental, alignExtendExtra]);
+  /** Agent 任务模式：驱动侧边栏微步骤视图 */
+  const [currentAgentTask, setCurrentAgentTask] = useState<AgentTask>('IDLE');
+  /** 左侧画布联动：Agent 处理某列时高亮 */
+  const [highlightedColumn, setHighlightedColumn] = useState<string | null>(null);
+  /** 冲突行索引：画布滚动并高亮 */
+  const [conflictRowIndex, setConflictRowIndex] = useState<number | null>(null);
+  /** 上传解析得到的新表行数据，供 Agent 流程使用 */
+  const [newRows, setNewRows] = useState<Record<string, string | null>[]>([]);
+  /** 已清洗数据：AUDIT_REPORT 阶段纠错后的结果，合并时强制使用此数据源 */
+  const [cleanedExtraData, setCleanedExtraData] = useState<Record<string, string | null>[] | null>(null);
+  /** 变更提醒：MAPPING 确认后、PREVIEW 前的 baseline 快照 */
+  const [baselineRows, setBaselineRows] = useState<Record<string, string | null>[] | null>(null);
+  /** 技能实验室：已保存技能 */
+  const [savedSkills, setSavedSkills] = useState<SavedSkill[]>([]);
+  /** 技能实验室：上传后检测到的匹配技能 */
+  const [matchedSkill, setMatchedSkill] = useState<SavedSkill | null>(null);
 
   const hasData = mergeResult != null;
   const columns = mergeResult ? mergeResult.merged.columns : [];
@@ -103,10 +109,33 @@ export default function App() {
     }
   }, [hasData, remainingErrorCount, currentStep]);
 
+  /** 上传后解析 CSV 得到 newRows，供 Agent 流程使用 */
+  useEffect(() => {
+    if (!pendingFiles?.length) {
+      setNewRows([]);
+      return;
+    }
+    parseCsvFromFile(pendingFiles[0])
+      .then(setNewRows)
+      .catch(() => setNewRows([]));
+  }, [pendingFiles]);
+
+  /** 技能实验室：加载已保存技能 */
+  useEffect(() => {
+    fetch(`${FINAL_API_URL}/skills`)
+      .then((res) => res.ok ? res.json() : { skills: [] })
+      .then((data: { skills?: SavedSkill[] }) => setSavedSkills(data?.skills ?? []))
+      .catch(() => setSavedSkills([]));
+  }, []);
+
   const handleMergeScanResult = useCallback((result: MergeScanResult) => {
+    const rows = result.merged_data ?? result.merged?.rows ?? [];
     setMergeResult(result);
-    setFixerRows(result.merged.rows);
+    setFixerRows(rows);
     setLastFingerprint(result.fingerprint ?? null);
+    setLastMergeNewColumns([]);
+    setLastMergeConflictCells([]);
+    setHighlightedConflictCells(null);
     setCurrentStep('merging');
   }, []);
 
@@ -116,6 +145,122 @@ export default function App() {
     setIsAnalyzingHeaders(false);
     setStructureParams(null);
     setCurrentStep('structure_confirm');
+    /** currentAgentTask 由 AgentSidebar 的 handleUploadResult 通过 onTaskChange 设为 INTENT_CONFIRM */
+  }, []);
+
+  /** 技能实验室：删除技能（从 savedSkills 滤除对应 ID） */
+  const handleDeleteSkill = useCallback(async (skillId: string) => {
+    try {
+      const res = await fetch(`${FINAL_API_URL}/ai-task`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task: 'delete_skill', skill_id: skillId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.detail ?? '删除失败');
+      }
+      setSavedSkills((prev) => prev.filter((s) => s.id !== skillId));
+      if (matchedSkill?.id === skillId) {
+        setMatchedSkill(null);
+        setCurrentAgentTask('INTENT_CONFIRM');
+      }
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : '删除技能失败');
+    }
+  }, [matchedSkill?.id]);
+
+  /** 技能实验室：保存技能 */
+  const handleSaveSkill = useCallback(async (skill: Omit<SavedSkill, 'id'>) => {
+    try {
+      const res = await fetch(`${FINAL_API_URL}/skills`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(skill),
+      });
+      if (res.ok) {
+        const list = await fetch(`${FINAL_API_URL}/skills`).then((r) => r.json());
+        setSavedSkills(list?.skills ?? []);
+      }
+    } catch {
+      // 静默失败
+    }
+  }, []);
+
+  /** 维度增强：上次合并新增的列名 */
+  const [lastMergeNewColumns, setLastMergeNewColumns] = useState<string[]>([]);
+  /** 静默审计：上次合并的冲突单元格，供「查看变更详情」按需高亮 */
+  const [lastMergeConflictCells, setLastMergeConflictCells] = useState<Array<{ rowIndex: number; colKey: string }>>([]);
+  /** 用户点击「查看变更详情」时临时高亮的单元格，null 表示不高亮 */
+  const [highlightedConflictCells, setHighlightedConflictCells] = useState<Array<{ rowIndex: number; colKey: string }> | null>(null);
+  /** 数据体检：画布预览新表并高亮异常（行淡红+报错格红框） */
+  const [healthCheckPreview, setHealthCheckPreview] = useState<{
+    rows: Record<string, string | null>[];
+    dirtyCells: Array<{ rowIndex: number; colKey: string }>;
+    identityGapCells: Array<{ rowIndex: number; colKey: string }>;
+    emptyCells: Array<{ rowIndex: number; colKey: string }>;
+    /** 有审计错误的行索引，整行淡红背景 */
+    auditErrorRowIndices: number[];
+  } | null>(null);
+
+  /** Agent 合并完成：更新画布，并清除 baseline */
+  const handleAgentMergeComplete = useCallback((rows: Record<string, string | null>[], meta?: { newColumns?: string[]; conflictCells?: Array<{ rowIndex: number; colKey: string }> }) => {
+    setFixerRows(rows);
+    setBaselineRows(null);
+    setLastMergeNewColumns(meta?.newColumns ?? []);
+    setLastMergeConflictCells(meta?.conflictCells ?? []);
+    setHighlightedConflictCells(null);
+    setCurrentStep('canvas');
+    setConflictRowIndex(null);
+    setNewRows([]);
+    setCleanedExtraData(null);
+    setPendingFiles(null);
+    setHeaderReport(null);
+  }, []);
+
+  /** 变更提醒：MAPPING 确认后、PREVIEW 前捕获 baseline 快照 */
+  const handleBaselineCapture = useCallback((rows: Record<string, string | null>[]) => {
+    setBaselineRows(JSON.parse(JSON.stringify(rows)));
+  }, []);
+
+  /** 数据体检：展示/关闭画布异常高亮 */
+  const handleHealthCheckDisplay = useCallback((
+    rows: Record<string, string | null>[] | null,
+    dirtyCells: Array<{ rowIndex: number; colKey: string }>,
+    identityGapCells: Array<{ rowIndex: number; colKey: string }>,
+    emptyCells: Array<{ rowIndex: number; colKey: string }>
+  ) => {
+    if (rows == null) {
+      setHealthCheckPreview(null);
+      return;
+    }
+    const rowSet = new Set<number>();
+    (dirtyCells ?? []).forEach((c) => rowSet.add(c.rowIndex));
+    (identityGapCells ?? []).forEach((c) => rowSet.add(c.rowIndex));
+    (emptyCells ?? []).forEach((c) => rowSet.add(c.rowIndex));
+    setHealthCheckPreview({
+      rows,
+      dirtyCells: dirtyCells ?? [],
+      identityGapCells: identityGapCells ?? [],
+      emptyCells: emptyCells ?? [],
+      auditErrorRowIndices: [...rowSet],
+    });
+  }, []);
+
+  /** 数据体检：用户选择「我去修改文件」，清空上传状态以便重新上传 */
+  const handleRequestReUpload = useCallback(() => {
+    setPendingFiles(null);
+    setNewRows([]);
+    setCleanedExtraData(null);
+    setHeaderReport(null);
+    setHealthCheckPreview(null);
+    setCurrentAgentTask('IDLE');
+  }, []);
+
+  /** 数据体检：纠错后同步更新 newRows 与 cleanedExtraData，合并时强制使用 cleanedExtraData */
+  const handleHealthCheckFix = useCallback((fixedNewRows: Record<string, string | null>[]) => {
+    setNewRows(fixedNewRows);
+    setCleanedExtraData(fixedNewRows);
   }, []);
 
   /** 结构确认后：拉取专业规则（propose-rules）并进入规则确认步骤，不触发 merge-and-scan */
@@ -135,6 +280,7 @@ export default function App() {
       setProposeResult(data);
       setScanRules(data.basic);
       setCurrentStep('rules');
+      setCurrentAgentTask('IDLE');
     } catch (e) {
       setConfirmMergeError(e instanceof Error ? e.message : '获取诊断规则失败，请重试');
     } finally {
@@ -142,30 +288,7 @@ export default function App() {
     }
   }, []);
 
-  /** 确认对齐（旧流程 preview）：拉取专业规则并进入规则确认步骤 */
-  const handleConfirmAlign = useCallback(async () => {
-    if (!headerReport?.base_columns?.length) return;
-    setConfirmMergeError(null);
-    setConfirmAlignLoading(true);
-    try {
-      const res = await fetch(`${FINAL_API_URL}/propose-rules`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ base_columns: headerReport.base_columns }),
-      });
-      if (!res.ok) throw new Error('获取规则失败');
-      const data = (await res.json()) as ProposeRulesResult;
-      setProposeResult(data);
-      setScanRules(data.basic);
-      setCurrentStep('rules');
-    } catch (e) {
-      setConfirmMergeError(e instanceof Error ? e.message : '获取诊断规则失败，请重试');
-    } finally {
-      setConfirmAlignLoading(false);
-    }
-  }, [headerReport?.base_columns]);
-
-  /** 确认规则并开始扫描（旧流程：preview → rules 后调用）；优先传 cache_key 使用内存缓存 */
+  /** 确认规则并开始扫描；优先传 cache_key 使用内存缓存 */
   const handleStartScan = useCallback(async () => {
     if (!pendingFiles?.length && !headerReport?.cache_key) return;
     setConfirmMergeError(null);
@@ -340,8 +463,9 @@ export default function App() {
         throw new Error(typeof msg === 'string' ? msg : '同步失败');
       }
       const result = (await res.json()) as MergeScanResult;
+      const rows = result.merged_data ?? result.merged?.rows ?? [];
       setMergeResult(result);
-      setFixerRows(result.merged.rows);
+      setFixerRows(rows);
       setLastFingerprint(result.fingerprint ?? null);
       setSyncJustDone(true);
       setCurrentStep('analysis');
@@ -358,38 +482,53 @@ export default function App() {
     }
   }, [pendingFiles, structureParams, handleMergeScanResult]);
 
-  const bannerStep: FlowStep = currentStep === 'dashboard' ? 'done' : currentStep;
+  const bannerStep: FlowStep = currentStep === 'dashboard' ? 'done' : currentStep === 'canvas' ? 'idle' : currentStep;
 
   return (
-    <div className="app" style={{ background: 'var(--bg-page)', color: 'var(--text-primary)', minHeight: '100vh' }}>
-      <div className="mx-auto max-w-6xl px-4 py-6">
-        <div className="mb-6 flex items-center gap-3">
-          <h1 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>
-            AI 数据协作舱
-          </h1>
-          <span className="rounded-full bg-[var(--accent)]/20 px-2.5 py-0.5 text-xs font-medium text-[var(--accent)]">
-            线性对话流
-          </span>
-        </div>
-
-        <AIChatBanner
-          step={bannerStep}
-          activeError={currentStep === 'fixing' ? activeError : null}
-          schemaReport={schemaReport}
-          healthManifest={healthManifest}
-          headerReport={headerReport}
-          scanRules={scanRules}
-          proposeResult={proposeResult}
-          isAnalyzingHeaders={isAnalyzingHeaders}
-          remainingErrorCount={remainingErrorCount}
-          mergedRowCount={fixerRows.length}
-          mergedColumns={columns}
-          sourceUpdated={sourceUpdated}
-          onSyncUpdate={handleSilentSync}
-          syncJustDone={syncJustDone}
-          onSyncJustDoneDismiss={() => setSyncJustDone(false)}
-          isSyncing={confirmMergeLoading}
+    <div className="flex flex-row w-screen h-screen overflow-hidden bg-gray-50">
+      {/* 左侧画布区：flex-1 min-w-0 防止表格撑爆 */}
+      <div className="flex-1 h-full min-w-0 overflow-hidden">
+        <DataCanvas
+          rowData={healthCheckPreview ? healthCheckPreview.rows : fixerRows}
+          onDataChange={healthCheckPreview ? undefined : setFixerRows}
+          highlightedColumn={highlightedColumn}
+          conflictRowIndex={conflictRowIndex}
+          newColumns={lastMergeNewColumns}
+          highlightedConflictCells={highlightedConflictCells}
+          highlightedDirtyCells={healthCheckPreview?.dirtyCells ?? null}
+          highlightedIdentityGapCells={healthCheckPreview?.identityGapCells ?? null}
+          highlightedEmptyCells={healthCheckPreview?.emptyCells ?? null}
+          auditErrorRowIndices={healthCheckPreview?.auditErrorRowIndices ?? null}
         />
+      </div>
+
+      {/* 右侧 AI 助手侧边栏：固定宽度 w-[400px] */}
+      <aside className="w-[400px] flex-shrink-0 h-full bg-white border-l shadow-xl z-10 overflow-y-auto flex flex-col">
+        <div className="flex-shrink-0 px-4 py-3 border-b border-gray-200">
+          <h2 className="text-base font-semibold text-gray-800">AI 助手：任务模式</h2>
+          <span className="text-xs text-gray-500">微步骤引导</span>
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4">
+        {!['idle', 'canvas', 'structure_confirm', 'preview', 'rules'].includes(currentStep) && (
+          <AIChatBanner
+            step={bannerStep}
+            activeError={currentStep === 'fixing' ? activeError : null}
+            schemaReport={schemaReport}
+            healthManifest={healthManifest}
+            headerReport={headerReport}
+            scanRules={scanRules}
+            proposeResult={proposeResult}
+            isAnalyzingHeaders={isAnalyzingHeaders}
+            remainingErrorCount={remainingErrorCount}
+            mergedRowCount={fixerRows.length}
+            mergedColumns={columns}
+            sourceUpdated={sourceUpdated}
+            onSyncUpdate={handleSilentSync}
+            syncJustDone={syncJustDone}
+            onSyncJustDoneDismiss={() => setSyncJustDone(false)}
+            isSyncing={confirmMergeLoading}
+          />
+        )}
 
         <AnimatePresence mode="wait">
           {currentStep === 'merging' && hasData && (
@@ -399,76 +538,68 @@ export default function App() {
             </motion.div>
           )}
 
-          {currentStep === 'idle' && (
-            <motion.div key="idle" {...stepTransition} className="flex flex-col gap-4">
-              <FileDropzone
+          {['idle', 'canvas', 'structure_confirm', 'preview', 'rules'].includes(currentStep) && (
+            <motion.div key="agent" {...stepTransition} className="flex flex-col gap-4">
+              {confirmMergeError && (
+                <p className="text-sm text-red-400">{confirmMergeError}</p>
+              )}
+              {currentStep === 'canvas' && (lastMergeNewColumns.length > 0 || lastMergeConflictCells.length > 0) && (
+                <div className="rounded-xl border border-indigo-200 bg-indigo-50/80 p-4">
+                  <p className="text-sm font-semibold text-indigo-800 mb-2">✨ 合并报告</p>
+                  <p className="text-sm text-indigo-700 mb-2">
+                    检测到 <strong>{lastMergeConflictCells.length}</strong> 处冲突
+                    {lastMergeNewColumns.length > 0 ? (
+                      <>，成功为您新增了 <strong>[{lastMergeNewColumns.join('、')}]</strong> 等 <strong>{lastMergeNewColumns.length}</strong> 个新维度。</>
+                    ) : (
+                      <>。</>
+                    )}
+                  </p>
+                  {lastMergeConflictCells.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setHighlightedConflictCells(highlightedConflictCells ? null : lastMergeConflictCells)}
+                      className="text-xs px-3 py-1.5 rounded-lg border border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50"
+                    >
+                      {highlightedConflictCells ? '关闭高亮' : '查看变更详情'}
+                    </button>
+                  )}
+                </div>
+              )}
+              <AgentSidebar
+                task={
+                  ['structure_confirm', 'preview', 'canvas'].includes(currentStep)
+                    ? currentAgentTask
+                    : 'IDLE'
+                }
+                onTaskChange={setCurrentAgentTask}
+                isAnalyzingHeaders={isAnalyzingHeaders}
+                headerReport={headerReport}
                 onHeaderResult={handleHeaderResult}
                 onAnalyzingHeaders={() => setIsAnalyzingHeaders(true)}
                 onAnalyzeError={() => setIsAnalyzingHeaders(false)}
-                disabled={false}
-              />
-              <BackendStatus />
-            </motion.div>
-          )}
-
-          {currentStep === 'structure_confirm' && headerReport && (
-            <motion.div key="structure_confirm" {...stepTransition} className="flex flex-col gap-4">
-              {confirmMergeError && (
-                <p className="text-sm text-red-400">{confirmMergeError}</p>
-              )}
-              <MergeDecisionCenter
-                report={headerReport}
-                onConfirmStructure={handleConfirmStructure}
-                loading={confirmAlignLoading}
-              />
-              {confirmAlignLoading && (
-                <div className="flex items-center justify-center gap-2 text-[var(--text-secondary)] text-sm">
-                  <div className="h-5 w-5 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin" aria-hidden />
-                  <span>正在获取诊断规则…</span>
-                </div>
-              )}
-            </motion.div>
-          )}
-
-          {currentStep === 'preview' && headerReport && (
-            <motion.div key="preview" {...stepTransition} className="flex flex-col gap-4">
-              {confirmMergeError && (
-                <p className="text-sm text-red-400">{confirmMergeError}</p>
-              )}
-              <HeaderPreview
-                report={headerReport}
-                onConfirm={(params) => {
-                  if (params?.extend_extra != null) setAlignExtendExtra(params.extend_extra);
-                  handleConfirmAlign();
+                baseRows={fixerRows}
+                newRows={newRows}
+                mergeSourceRows={cleanedExtraData ?? newRows}
+                onMergeComplete={handleAgentMergeComplete}
+                baselineRows={baselineRows ?? undefined}
+                onBaselineCapture={handleBaselineCapture}
+                onRequestReUpload={handleRequestReUpload}
+                onHealthCheckDisplay={handleHealthCheckDisplay}
+                onHealthCheckFix={handleHealthCheckFix}
+                highlightedColumn={highlightedColumn}
+                onHighlightColumn={setHighlightedColumn}
+                conflictRowIndex={conflictRowIndex}
+                onConflictRowIndex={setConflictRowIndex}
+                onSyncToProduct={(productName, _newCols) => {
+                  if (productName == null) setConflictRowIndex(null);
                 }}
-                confirmDisabled={confirmAlignLoading}
+                savedSkills={savedSkills}
+                onDeleteSkill={handleDeleteSkill}
+                onSaveSkill={handleSaveSkill}
+                matchedSkill={matchedSkill}
+                onSkillMatchDetected={setMatchedSkill}
+                onSkipSkillApply={() => setMatchedSkill(null)}
               />
-              {confirmAlignLoading && (
-                <div className="flex items-center justify-center gap-2 text-[var(--text-secondary)] text-sm">
-                  <div className="h-5 w-5 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin" aria-hidden />
-                  <span>正在获取诊断规则…</span>
-                </div>
-              )}
-            </motion.div>
-          )}
-
-          {currentStep === 'rules' && proposeResult && (
-            <motion.div key="rules" {...stepTransition} className="flex flex-col gap-4">
-              {confirmMergeError && (
-                <p className="text-sm text-red-400">{confirmMergeError}</p>
-              )}
-              <RuleReview
-                result={proposeResult}
-                onConfirm={handleConfirmRulesAndMerge}
-                confirmDisabled={confirmMergeLoading}
-                mergeSummary={rulesMergeSummary}
-              />
-              {confirmMergeLoading && (
-                <div className="flex items-center justify-center gap-2 text-[var(--text-secondary)] text-sm">
-                  <div className="h-5 w-5 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin" aria-hidden />
-                  <span>正在合并与健康扫描…</span>
-                </div>
-              )}
             </motion.div>
           )}
 
@@ -502,6 +633,17 @@ export default function App() {
                   合表与清洗已完成，请确认。确认后可进入分析工作台、查看看板或导出 Excel。
                 </p>
                 <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFixerRows((prev) => (prev.length ? [...prev] : prev));
+                      setCurrentStep('canvas');
+                    }}
+                    className="btn-primary flex items-center gap-2 rounded-[var(--radius)] border-0 px-4 py-2 text-sm font-medium"
+                    style={{ background: 'var(--accent)', color: '#fff', boxShadow: 'var(--shadow)' }}
+                  >
+                    返回画布
+                  </button>
                   <button
                     type="button"
                     onClick={() => setCurrentStep('analysis')}
@@ -564,6 +706,17 @@ export default function App() {
               <div className="flex flex-wrap items-center gap-3">
                 <button
                   type="button"
+                  onClick={() => {
+                    setFixerRows((prev) => (prev.length ? [...prev] : prev));
+                    setCurrentStep('canvas');
+                  }}
+                  className="rounded-[var(--radius)] border-0 px-4 py-2 text-sm font-medium"
+                  style={{ background: 'var(--accent)', color: '#fff', boxShadow: 'var(--shadow)' }}
+                >
+                  返回画布
+                </button>
+                <button
+                  type="button"
                   onClick={() => setCurrentStep('done')}
                   className="rounded-[var(--radius)] border border-[var(--border)] px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
                 >
@@ -587,7 +740,8 @@ export default function App() {
             </motion.div>
           )}
         </AnimatePresence>
-      </div>
+        </div>
+      </aside>
     </div>
   );
 }

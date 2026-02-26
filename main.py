@@ -7,16 +7,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sys
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from fastapi import FastAPI, File, Form, UploadFile, HTTPException
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.merger import TableMerger, analyze_headers_with_strategy_from_contents
@@ -62,6 +63,29 @@ def df_to_merged_json(df):
     return {"columns": list(df.columns), "rows": out}
 
 
+# 技能实验室：持久化存储路径（不带 /api 前缀）
+_SKILLS_FILE = ROOT / "data" / "skills.json"
+
+
+def _load_skills() -> List[Dict[str, Any]]:
+    """从文件加载技能列表"""
+    if not _SKILLS_FILE.exists():
+        return []
+    try:
+        with open(_SKILLS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _save_skills(skills: List[Dict[str, Any]]) -> None:
+    """保存技能列表到文件"""
+    _SKILLS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(_SKILLS_FILE, "w", encoding="utf-8") as f:
+        json.dump(skills, f, ensure_ascii=False, indent=2)
+
+
 @app.get("/")
 def root():
     return {
@@ -70,7 +94,42 @@ def root():
         "analyze_headers": "POST /api/analyze-headers",
         "merge_and_scan": "POST /api/merge-and-scan",
         "check_status": "GET /api/check-status",
+        "ai_task": "POST /ai-task",
+        "skills": "GET /skills, POST /skills",
     }
+
+
+@app.get("/skills")
+def get_skills():
+    """技能实验室：获取已保存的技能列表"""
+    return {"skills": _load_skills()}
+
+
+@app.post("/skills")
+async def post_skill(req: Request):
+    """技能实验室：保存新技能"""
+    try:
+        body = await req.json()
+    except Exception:
+        raise HTTPException(400, "Invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Body must be JSON object")
+    name = body.get("name") or ""
+    if not name.strip():
+        raise HTTPException(400, "技能名称不能为空")
+    skill = {
+        "id": body.get("id") or str(uuid.uuid4()),
+        "name": name.strip(),
+        "anchorColumn": body.get("anchorColumn") or "商品名称",
+        "mapping": body.get("mapping") or {},
+        "intent": body.get("intent") or "expand",
+        "addNewRows": body.get("addNewRows", True),
+        "expectedColumns": body.get("expectedColumns") or list((body.get("mapping") or {}).keys()),
+    }
+    skills = _load_skills()
+    skills.append(skill)
+    _save_skills(skills)
+    return {"ok": True, "skill": skill}
 
 
 @app.get("/api/check-status")
@@ -87,6 +146,221 @@ def check_status():
 def health():
     """健康检查，供前端或代理确认后端已启动。"""
     return {"status": "ok", "port": 5001}
+
+
+def _format_fix_value(col_key: str, value: str) -> Optional[str]:
+    """模拟 AI 格式纠错：日期、金额等不标准格式规范化。"""
+    if not value or not isinstance(value, str):
+        return None
+    s = value.strip()
+    if not s:
+        return None
+
+    col_lower = (col_key or "").lower()
+    # 日期类列：2026.1.1 / 2026/1/1 / 20260101 -> 2026-01-01
+    if any(kw in col_lower for kw in ("日期", "时间", "date", "time", "创建", "启用")):
+        for sep in (".", "/", "-", " "):
+            if sep in s:
+                parts = re.split(r"[\s./\-]+", s)
+                if len(parts) >= 3:
+                    try:
+                        y = int(parts[0])
+                        m = int(parts[1])
+                        d = int(parts[2])
+                        if 1900 <= y <= 2100 and 1 <= m <= 12 and 1 <= d <= 31:
+                            return f"{y:04d}-{m:02d}-{d:02d}"
+                    except (ValueError, IndexError):
+                        pass
+        if re.match(r"^\d{8}$", s):
+            try:
+                y, m, d = int(s[:4]), int(s[4:6]), int(s[6:8])
+                if 1 <= m <= 12 and 1 <= d <= 31:
+                    return f"{y:04d}-{m:02d}-{d:02d}"
+            except ValueError:
+                pass
+
+    # 金额/数值类列：去除空格、统一小数点
+    if any(kw in col_lower for kw in ("金额", "价格", "分数", "数量", "amount", "price", "score")):
+        cleaned = re.sub(r"\s+", "", s).replace("，", ".")
+        if re.match(r"^-?[\d.]+$", cleaned):
+            try:
+                f = float(cleaned)
+                return f"{f:.2f}" if "." in cleaned or "." in str(f) else str(int(f))
+            except ValueError:
+                pass
+
+    return None
+
+
+def _fill_missing_from_row(col_key: str, row: Dict[str, Any]) -> Optional[str]:
+    """根据同行其他列猜测缺失值。"""
+    if not isinstance(row, dict):
+        return None
+    col_lower = (col_key or "").lower()
+
+    # 根据列名语义推断占位
+    if any(kw in col_lower for kw in ("日期", "date", "时间")):
+        for k, v in row.items():
+            if v and k != col_key and any(x in (k or "").lower() for x in ("日期", "date")):
+                return str(v) if v else None
+        return "未知日期"
+    if any(kw in col_lower for kw in ("金额", "价格", "分数", "数量")):
+        return "0"
+    if any(kw in col_lower for kw in ("姓名", "name", "名称")):
+        for k, v in row.items():
+            if v and k != col_key and any(x in (k or "").lower() for x in ("姓名", "name", "负责人")):
+                return str(v)
+        return "未知"
+    if any(kw in col_lower for kw in ("班级", "部门", "dept")):
+        for k, v in row.items():
+            if v and k != col_key:
+                return str(v)
+        return "-"
+
+    return "待补全"
+
+
+@app.post("/ai-task")
+async def ai_task(req: Request):
+    """
+    AI 任务接口：格式纠错、补全缺失值、摘要/翻译。
+    接收 { task, row_index, col_key, value, row }，返回 { suggested_value? }。
+    不带 /api 前缀，兼容现有 CORS 配置。
+    """
+    try:
+        body = await req.json()
+    except Exception:
+        raise HTTPException(400, "Invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Body must be JSON object")
+
+    task = body.get("task", "")
+    row_index = body.get("row_index", body.get("rowIndex", -1))
+    col_key = body.get("col_key", body.get("colKey", ""))
+    value = body.get("value")
+    row = body.get("row") or {}
+    rows = body.get("rows") or []
+
+    suggested = None
+    issues: List[Dict[str, Any]] = []
+
+    if task == "agent_step":
+        # Agent 任务驱动型流程：意图确认、映射对齐、冲突处理、合并预演
+        step = body.get("step", "")
+        return {"ok": True, "step": step}
+
+    if task == "agent_preview":
+        # 维度合入：异步获取预览统计，不阻塞 UI
+        base_rows = body.get("base_rows") or []
+        new_rows = body.get("new_rows") or []
+        anchor = body.get("anchor_column") or "商品名称"
+        base_products = {str(r.get(anchor, "")) for r in base_rows if isinstance(r, dict)}
+        new_products = {str(r.get(anchor, "")) for r in new_rows if isinstance(r, dict)}
+        matched = sum(1 for r in base_rows if isinstance(r, dict) and str(r.get(anchor, "")) in new_products)
+        new_only = len(new_products - base_products)
+        base_only = len(base_products - new_products)
+        return {
+            "ok": True,
+            "matched_count": matched,
+            "new_only_count": new_only,
+            "base_only_count": base_only,
+        }
+
+    if task == "change_detect":
+        # 三维度差异识别：新增、变化、删除
+        baseline_rows = body.get("baseline_rows") or []
+        new_mapped_rows = body.get("new_mapped_rows") or []
+        anchor = body.get("anchor_column") or "商品名称"
+        # 严格基于字段名：仅对比传入的共有列；空数组表示无共有列，则 0 处 modified
+        compare_cols = body.get("compare_columns")
+        if compare_cols is None:
+            compare_cols = ["成本价", "售价", "剩余库存数", "商品采购入库数", "销售数量"]
+        base_by_product: Dict[str, List[Tuple[int, Dict[str, Any]]]] = {}
+        for i, r in enumerate(baseline_rows):
+            if not isinstance(r, dict):
+                continue
+            pn = str(r.get(anchor, ""))
+            if pn not in base_by_product:
+                base_by_product[pn] = []
+            base_by_product[pn].append((i, r))
+        new_by_product: Dict[str, Dict[str, Any]] = {}
+        for r in new_mapped_rows:
+            if not isinstance(r, dict):
+                continue
+            pn = str(r.get(anchor, ""))
+            if pn:
+                new_by_product[pn] = r
+        base_products = set(base_by_product.keys())
+        new_products = set(new_by_product.keys())
+        added = list(new_products - base_products)
+        deleted = list(base_products - new_products)
+        modified: List[Dict[str, Any]] = []
+        for pn in base_products & new_products:
+            new_row = new_by_product.get(pn) or {}
+            for base_idx, base_row in base_by_product.get(pn, []):
+                changes = []
+                for col in compare_cols:
+                    if col not in base_row and col not in new_row:
+                        continue
+                    bv = base_row.get(col)
+                    nv = new_row.get(col)
+                    if str(bv or "") != str(nv or ""):
+                        changes.append({"col": col, "oldVal": bv, "newVal": nv})
+                if changes:
+                    modified.append({
+                        "productName": pn,
+                        "baseRowIndex": base_idx,
+                        "changes": changes,
+                    })
+        return {
+            "ok": True,
+            "addedCount": len(added),
+            "modifiedCount": len(modified),
+            "deletedCount": len(deleted),
+            "addedProducts": added,
+            "modifiedRows": modified,
+            "deletedProducts": deleted,
+        }
+
+    if task == "delete_skill":
+        skill_id = body.get("skill_id") or body.get("skillId") or ""
+        if not skill_id:
+            raise HTTPException(400, "skill_id required")
+        skills = _load_skills()
+        before = len(skills)
+        skills = [s for s in skills if isinstance(s, dict) and str(s.get("id", "")) != str(skill_id)]
+        if len(skills) == before:
+            raise HTTPException(404, "Skill not found")
+        _save_skills(skills)
+        return {"ok": True, "deleted": skill_id}
+
+    if task == "scan_all":
+        # 全表体检：遍历所有单元格，识别格式问题，返回 issues 列表
+        for ri, r in enumerate(rows):
+            if not isinstance(r, dict):
+                continue
+            for ck, v in r.items():
+                if v is None or not str(v).strip():
+                    continue
+                fixed = _format_fix_value(ck, str(v))
+                if fixed and fixed != str(v).strip():
+                    issues.append({"rowIndex": ri, "colKey": ck, "suggested_value": fixed})
+        return {"issues": issues}
+
+    if task == "format_fix":
+        if value is not None and str(value).strip():
+            result = _format_fix_value(col_key, str(value))
+            suggested = result if result else str(value).strip()
+
+    elif task == "fill_missing":
+        if value is None or not str(value).strip():
+            suggested = _fill_missing_from_row(col_key, row)
+
+    elif task == "summary_translate":
+        if value is not None and str(value).strip():
+            suggested = str(value).strip()
+
+    return {"suggested_value": suggested}
 
 
 # 与 DataHealthScanner 默认规则一致
