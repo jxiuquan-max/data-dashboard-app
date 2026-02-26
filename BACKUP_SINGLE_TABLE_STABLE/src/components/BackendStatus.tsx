@@ -1,0 +1,77 @@
+/**
+ * 录入步骤后端状态检测：请求 /api/health，显示是否已连接及正确启动命令（端口 5001）
+ */
+
+import { useEffect, useState } from 'react';
+import { CheckCircle } from 'lucide-react';
+
+// 1. 获取你在 Render 配置的环境变量（注意：名字必须和你 Render 设置的一致）
+// 你在 Render 填的是 VITE_API_BASE_URL，所以这里也要改
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
+
+// 2. 识别当前环境：是开发模式(dev)还是生产模式(prod)
+const isProd = import.meta.env.PROD;
+
+// 3. 动态确定后端连接地址
+// 如果是线上，优先用 API_BASE；如果是本地，死磕 5001
+const FINAL_API_URL = isProd ? API_BASE : "http://127.0.0.1:5001";
+
+// 在第 18 行添加这一行，消除红线
+const BACKEND_PORT = 5001;
+
+export function BackendStatus() {
+  const [status, setStatus] = useState<'checking' | 'ok' | 'fail'>('checking');
+
+  useEffect(() => {
+    let cancelled = false;
+    setStatus('checking');
+    fetch(`${FINAL_API_URL}/health`)
+      .then((res) => {
+        if (cancelled) return;
+        setStatus(res.ok ? 'ok' : 'fail');
+      })
+      .catch(() => {
+        if (!cancelled) setStatus('fail');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (status === 'checking') {
+    return (
+      <p className="text-xs text-[var(--text-muted)]">
+        后端状态：检测中…
+      </p>
+    );
+  }
+
+  if (status === 'ok') {
+    return (
+      <p className="flex items-center gap-1.5 text-xs text-emerald-400">
+        <CheckCircle className="h-3.5 w-3.5" aria-hidden />
+        {/* 将第 50 行修改为 */}
+        后端已连接 {isProd ? '(云端)' : '(端口 5001)'}
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1 text-xs text-[var(--text-muted)]">
+      <p>
+        若上传无响应，请先启动后端：在项目根目录执行{' '}
+        <code className="rounded bg-[var(--bg-hover)] px-1 text-[var(--text-primary)]">
+          uvicorn main:app --port {BACKEND_PORT}
+        </code>
+        ，然后刷新本页或点击上传区域重试。
+      </p>
+      <p>
+        若端口被占用，可先杀掉旧进程：macOS/Linux 执行{' '}
+        <code className="rounded bg-[var(--bg-hover)] px-1 text-[var(--text-primary)]">
+          lsof -ti:{BACKEND_PORT} | xargs kill -9
+        </code>
+        。
+      </p>
+    </div>
+  );
+}
