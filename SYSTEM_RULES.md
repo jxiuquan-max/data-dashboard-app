@@ -126,13 +126,4 @@ function charOverlapScore(newStr: string, baseStr: string): number {
 
 ---
 
-## 6. 单表合并完整性守护
-
-**当前版本已实现稳定的单表纠错与 Skill 进化，后续开发严禁破坏单表合并的独立完整性。**
-
-- 单表流程：IDLE -> INTENT_CONFIRM -> MAPPING_ALIGN -> AUDIT_REPORT -> DIFF_PREVIEW -> FINAL_PREVIEW -> SKILL_SAVE_PROMPT
-- 多表流水线为扩展功能，不得影响单表合并的独立可用性
-
----
-
 *存档时间：稳定版 - 完整实现数据审计与智能模糊纠错*

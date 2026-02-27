@@ -222,10 +222,54 @@
   border: none !important;
 }
 
-/* 维度增强：新列表头 - 浅蓝色 + 新增维度 */
+/* 维度增强：新列表头 - 淡蓝色 #F0F7FF（追加表新列） */
 .ag-theme-alpine .ag-header-new-column {
-  background: #dbeafe !important;
+  background: #F0F7FF !important;
   color: #1e40af !important;
+}
+
+/* 分组表头：核心数据 / 增强属性 */
+.ag-theme-alpine .ag-header-group-core {
+  background: #f8fafc !important;
+  font-weight: 600;
+  color: #475569;
+}
+.ag-theme-alpine .ag-header-group-extra {
+  background: #e0f2fe !important;
+  font-weight: 600;
+  color: #0369a1;
+}
+
+/* 来源染色：增强列统一浅蓝背景 */
+.ag-theme-alpine .ag-cell-extra-column {
+  background-color: #F5F9FF !important;
+}
+
+/* 关联键列：商品名称高亮边框 + 链接图标 */
+.ag-theme-alpine .ag-header-key-column {
+  border-left: 2px solid #3b82f6 !important;
+  background: linear-gradient(90deg, rgba(59, 130, 246, 0.08), transparent) !important;
+}
+.ag-theme-alpine .ag-header-key-column .ag-header-cell-text::after {
+  content: ' 🔗';
+  font-size: 0.85em;
+  opacity: 0.8;
+}
+.ag-theme-alpine .ag-cell-key-column {
+  border-left: 2px solid #3b82f6 !important;
+  background: linear-gradient(90deg, rgba(59, 130, 246, 0.06), transparent) !important;
+}
+
+/* 孤儿行沉底：斜体 + 灰色 */
+.ag-theme-alpine .ag-row-orphan .ag-cell {
+  font-style: italic !important;
+  color: #94a3b8 !important;
+}
+
+/* 增强列空值占位：灰色 -- */
+.ag-theme-alpine .ag-cell-empty-placeholder {
+  color: #94a3b8 !important;
+  font-style: italic;
 }
 
 /* 维度合入：新列单元格保持底色，不添加干扰背景 */
@@ -246,4 +290,20 @@
   border: 2px solid #dc2626 !important;
   font-weight: 600 !important;
   box-shadow: inset 0 0 0 1px rgba(220, 38, 38, 0.3);
+}
+
+/* 画布原位预览：已纠错/已处理单元格 - 淡黄背景 */
+.ag-theme-alpine .ag-cell-corrected {
+  background-color: #fef9c3 !important;
+}
+
+/* 画布定位：2 秒淡入淡出高亮动画 */
+.ag-theme-alpine .ag-row-highlight-navigate .ag-cell {
+  animation: row-highlight-pulse 2s ease-in-out;
+}
+@keyframes row-highlight-pulse {
+  0%, 100% { background-color: transparent; }
+  15% { background-color: #fef08a; }
+  50% { background-color: #fef9c3; }
+  85% { background-color: #fef08a; }
 }

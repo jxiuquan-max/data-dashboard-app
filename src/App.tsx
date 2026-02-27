@@ -23,11 +23,9 @@ import { parseCsvFromFile } from './utils/parseCsv';
 import type { SavedSkill } from './types/skill';
 import './App.css';
 
-// --- 💡 粘贴这一段到 App.tsx 顶部 ---
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 const isProd = import.meta.env.PROD;
 const FINAL_API_URL = isProd ? API_BASE : "http://127.0.0.1:5001";
-// --- 粘贴结束 ---
 
 const UPLOAD_TIMEOUT_MS = 60000;
 
