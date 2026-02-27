@@ -109,6 +109,13 @@ export default function App() {
     }
   }, [hasData, remainingErrorCount, currentStep]);
 
+  /** 样式解耦：离开 AUDIT 时清空 stagedPreviewData，确保预览样式仅 AUDIT 时生效 */
+  useEffect(() => {
+    if (currentAgentTask !== 'AUDIT_REPORT') {
+      setStagedPreviewData(null);
+    }
+  }, [currentAgentTask]);
+
   /** 上传后解析 CSV 得到 newRows，供 Agent 流程使用 */
   useEffect(() => {
     if (!pendingFiles?.length) {
@@ -219,12 +226,34 @@ export default function App() {
     /** 有审计错误的行索引，整行淡红背景 */
     auditErrorRowIndices: number[];
   } | null>(null);
+  /** AUDIT 全量预览：Full Join 数据，仅 currentAgentTask === 'AUDIT_REPORT' 时生效，含 remapped 错误单元格 */
+  const [stagedPreviewData, setStagedPreviewData] = useState<{
+    rows: Record<string, string | null>[];
+    baseColumns: string[];
+    extraColumns: string[];
+    orphanRowIndices: number[];
+    dirtyCells: Array<{ rowIndex: number; colKey: string }>;
+    identityGapCells: Array<{ rowIndex: number; colKey: string }>;
+    emptyCells: Array<{ rowIndex: number; colKey: string }>;
+    auditErrorRowIndices: number[];
+  } | null>(null);
 
-  /** Agent 合并完成：更新画布，并清除 baseline */
+  /** Agent 合并完成：更新画布，并清除 baseline；必须同步 mergeResult 以携带表头，否则首页错位 */
   const handleAgentMergeComplete = useCallback((rows: Record<string, string | null>[], meta?: { newColumns?: string[]; conflictCells?: Array<{ rowIndex: number; colKey: string }> }) => {
+    const previewColumns = rows.length && rows[0]
+      ? Object.keys(rows[0]).filter((k) => !['_diffStatus', '_diffChangedCols'].includes(k))
+      : meta?.newColumns ?? [];
     setFixerRows(rows);
-    setBaselineRows(null);
     setLastMergeNewColumns(meta?.newColumns ?? []);
+    setMergeResult((prev) => {
+      const merged = { columns: previewColumns.length ? previewColumns : (prev?.merged?.columns ?? []), rows };
+      return prev ? { ...prev, merged: { ...prev.merged, ...merged } } : {
+        schema_report: { tables: [] },
+        health_manifest: emptyManifest,
+        merged,
+      };
+    });
+    setBaselineRows(null);
     setLastMergeConflictCells(meta?.conflictCells ?? []);
     setHighlightedConflictCells(null);
     setCurrentStep('canvas');
@@ -268,6 +297,7 @@ export default function App() {
   ) => {
     if (rows == null) {
       setHealthCheckPreview(null);
+      setStagedPreviewData(null);
       return;
     }
     const rowSet = new Set<number>();
@@ -283,14 +313,16 @@ export default function App() {
     });
   }, []);
 
-  /** 数据体检：用户选择「我去修改文件」，清空上传状态以便重新上传 */
+  /** 数据体检：用户选择「我去修改文件」，仅清空临时变量，严禁重置 baseTable/baseColumns */
   const handleRequestReUpload = useCallback(() => {
     setPendingFiles(null);
     setNewRows([]);
     setCleanedExtraData(null);
     setHeaderReport(null);
     setHealthCheckPreview(null);
+    setStagedPreviewData(null);
     setCurrentAgentTask('IDLE');
+    /* 保留 fixerRows、mergeResult、lastMergeNewColumns，确保返回首页后画布仍展示最新成果 */
   }, []);
 
   /** 数据体检：纠错后同步更新 newRows 与 cleanedExtraData，合并时强制使用 cleanedExtraData */
@@ -298,6 +330,28 @@ export default function App() {
     setNewRows(fixedNewRows);
     setCleanedExtraData(fixedNewRows);
   }, []);
+
+  /** 原子化转正：将 stagedPreviewData 正式写入 baseTable，previewColumns 写入 baseColumns，必须在切换任务前完成 */
+  const handleStagedCommit = useCallback(() => {
+    if (!stagedPreviewData) return false;
+    const { rows, baseColumns, extraColumns } = stagedPreviewData;
+    const previewColumns = [...baseColumns, ...extraColumns];
+    setFixerRows(rows);
+    setLastMergeNewColumns(extraColumns);
+    setMergeResult((prev) => {
+      const merged = { columns: previewColumns, rows };
+      return prev ? { ...prev, merged: { ...prev.merged, ...merged } } : {
+        schema_report: { tables: [] },
+        health_manifest: emptyManifest,
+        merged,
+      };
+    });
+    setStagedPreviewData(null);
+    setHealthCheckPreview(null);
+    setCurrentStep('canvas');
+    setCurrentAgentTask('SKILL_SAVE_PROMPT');
+    return true;
+  }, [stagedPreviewData]);
 
   /** 结构确认后：拉取专业规则（propose-rules）并进入规则确认步骤，不触发 merge-and-scan */
   const handleConfirmStructure = useCallback(async (params: StructureConfirmParams) => {
@@ -525,16 +579,64 @@ export default function App() {
       {/* 左侧画布区：flex-1 min-w-0 防止表格撑爆 */}
       <div className="flex-1 h-full min-w-0 overflow-hidden">
         <DataCanvas
-          rowData={healthCheckPreview ? healthCheckPreview.rows : fixerRows}
-          onDataChange={healthCheckPreview ? undefined : setFixerRows}
+          rowData={
+            currentAgentTask === 'AUDIT_REPORT' && stagedPreviewData
+              ? stagedPreviewData.rows
+              : healthCheckPreview
+                ? healthCheckPreview.rows
+                : fixerRows
+          }
+          onDataChange={
+            currentAgentTask === 'AUDIT_REPORT' && (stagedPreviewData || healthCheckPreview)
+              ? undefined
+              : setFixerRows
+          }
+          columns={
+            currentAgentTask === 'AUDIT_REPORT' && stagedPreviewData
+              ? [
+                  ...stagedPreviewData.baseColumns.map((c) => ({ field: c, headerName: c, isNewColumn: false })),
+                  ...stagedPreviewData.extraColumns.map((c) => ({ field: c, headerName: c, isNewColumn: true })),
+                ]
+              : columns?.length
+                ? columns.map((c) => ({ field: c, headerName: c, isNewColumn: lastMergeNewColumns.includes(c) }))
+                : fixerRows.length > 0 && fixerRows[0]
+                  ? Object.keys(fixerRows[0]).filter((k) => !['_diffStatus', '_diffChangedCols'].includes(k)).map((c) => ({
+                      field: c,
+                      headerName: c,
+                      isNewColumn: lastMergeNewColumns.includes(c),
+                    }))
+                  : undefined
+          }
           highlightedColumn={highlightedColumn}
           conflictRowIndex={conflictRowIndex}
-          newColumns={lastMergeNewColumns}
+          newColumns={
+            currentAgentTask === 'AUDIT_REPORT' && stagedPreviewData
+              ? stagedPreviewData.extraColumns
+              : lastMergeNewColumns
+          }
+          isAuditPreview={currentAgentTask === 'AUDIT_REPORT'}
+          orphanRowIndices={currentAgentTask === 'AUDIT_REPORT' && stagedPreviewData ? stagedPreviewData.orphanRowIndices : undefined}
           highlightedConflictCells={highlightedConflictCells}
-          highlightedDirtyCells={healthCheckPreview?.dirtyCells ?? null}
-          highlightedIdentityGapCells={healthCheckPreview?.identityGapCells ?? null}
-          highlightedEmptyCells={healthCheckPreview?.emptyCells ?? null}
-          auditErrorRowIndices={healthCheckPreview?.auditErrorRowIndices ?? null}
+          highlightedDirtyCells={
+            currentAgentTask === 'AUDIT_REPORT' && stagedPreviewData
+              ? stagedPreviewData.dirtyCells
+              : healthCheckPreview?.dirtyCells ?? null
+          }
+          highlightedIdentityGapCells={
+            currentAgentTask === 'AUDIT_REPORT' && stagedPreviewData
+              ? stagedPreviewData.identityGapCells
+              : healthCheckPreview?.identityGapCells ?? null
+          }
+          highlightedEmptyCells={
+            currentAgentTask === 'AUDIT_REPORT' && stagedPreviewData
+              ? stagedPreviewData.emptyCells
+              : healthCheckPreview?.emptyCells ?? null
+          }
+          auditErrorRowIndices={
+            currentAgentTask === 'AUDIT_REPORT' && stagedPreviewData
+              ? stagedPreviewData.auditErrorRowIndices
+              : healthCheckPreview?.auditErrorRowIndices ?? null
+          }
         />
       </div>
 
@@ -621,6 +723,8 @@ export default function App() {
                 onBaselineCapture={handleBaselineCapture}
                 onRequestReUpload={handleRequestReUpload}
                 onHealthCheckDisplay={handleHealthCheckDisplay}
+                onStagedCommit={handleStagedCommit}
+                onStagedPreviewData={setStagedPreviewData}
                 onHealthCheckFix={handleHealthCheckFix}
                 highlightedColumn={highlightedColumn}
                 onHighlightColumn={setHighlightedColumn}

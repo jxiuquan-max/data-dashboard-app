@@ -260,10 +260,22 @@
   background: linear-gradient(90deg, rgba(59, 130, 246, 0.06), transparent) !important;
 }
 
-/* 孤儿行沉底：斜体 + 灰色 */
+/* 孤儿行沉底：斜体 + 灰色 + 极淡灰背景 */
 .ag-theme-alpine .ag-row-orphan .ag-cell {
   font-style: italic !important;
   color: #94a3b8 !important;
+  background-color: rgba(241, 245, 249, 0.6) !important;
+}
+
+/* 异常行名称/关键列：红框定位 */
+.ag-theme-alpine .ag-cell-orphan-name {
+  border: 1px solid #dc2626 !important;
+  font-weight: 600 !important;
+}
+
+/* AUDIT 预览：extra 列表头与单元格 #F0F7FF，表头已通过 headerName 加 🔗 */
+.ag-theme-alpine .ag-audit-extra-col {
+  background-color: #F0F7FF !important;
 }
 
 /* 增强列空值占位：灰色 -- */

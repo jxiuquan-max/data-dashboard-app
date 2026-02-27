@@ -1,1 +1,66 @@
-[]
+[
+  {
+    "id": "520e2bcb-d922-43b5-84b9-fce401102159",
+    "name": "123",
+    "anchorColumn": "商品名称",
+    "mapping": {
+      "商品名称": "商品名称",
+      "商品大类": "__new__",
+      "商品小类": "__new__",
+      "商品采购入库数": "__new__",
+      "剩余库存数": "__new__",
+      "缺货提醒": "__new__"
+    },
+    "intent": "expand",
+    "addNewRows": true,
+    "expectedColumns": [
+      "商品名称",
+      "商品大类",
+      "商品小类",
+      "商品采购入库数",
+      "剩余库存数",
+      "缺货提醒"
+    ],
+    "nameMapping": {
+      "34寸准4k显示屏": "34吋准4k显示器",
+      "冰箱": "225升电冰箱",
+      "MateBook X 2026": "MateBook X 2020",
+      "VR头盔": "VR 虚拟现实头盔",
+      "洗衣机": "滚筒洗衣机",
+      "充电宝电源": "充电宝移动电源"
+    },
+    "historyFixes": [
+      {
+        "productName": "70英寸超大屏电视",
+        "colKey": "商品采购入库数",
+        "originalValue": "aaa",
+        "correctedValue": "0"
+      },
+      {
+        "productName": "ILCE-7M2微单",
+        "colKey": "商品采购入库数",
+        "originalValue": "bbb",
+        "correctedValue": "0"
+      },
+      {
+        "productName": "1.5匹空调挂机",
+        "colKey": "商品采购入库数",
+        "originalValue": "aaa",
+        "correctedValue": "0"
+      },
+      {
+        "productName": "Apple Watch Series 6",
+        "colKey": "剩余库存数",
+        "originalValue": "不确定",
+        "correctedValue": "0"
+      },
+      {
+        "productName": "Apple Watch Series 6",
+        "colKey": "商品采购入库数",
+        "originalValue": "",
+        "correctedValue": "0"
+      }
+    ],
+    "steps": []
+  }
+]

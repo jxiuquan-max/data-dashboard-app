@@ -142,6 +142,19 @@ export interface AgentSidebarProps {
   onRequestReUpload?: () => void;
   /** 数据体检：展示异常时，将新表数据与异常单元格传给画布以高亮 */
   onHealthCheckDisplay?: (rows: Record<string, string | null>[] | null, dirtyCells: Array<{ rowIndex: number; colKey: string }>, identityGapCells: Array<{ rowIndex: number; colKey: string }>, emptyCells: Array<{ rowIndex: number; colKey: string }>) => void;
+  /** 原子化转正：AUDIT 确认时，将 stagedPreviewData 写入 baseTable，返回 true 表示已提交 */
+  onStagedCommit?: () => boolean;
+  /** AUDIT 全量预览：Full Join 数据，baseColumns + extraColumns，orphanRowIndices，remapped 错误单元格（rowIndex 已转换为 staged 行序） */
+  onStagedPreviewData?: (data: {
+    rows: Record<string, string | null>[];
+    baseColumns: string[];
+    extraColumns: string[];
+    orphanRowIndices: number[];
+    dirtyCells: Array<{ rowIndex: number; colKey: string }>;
+    identityGapCells: Array<{ rowIndex: number; colKey: string }>;
+    emptyCells: Array<{ rowIndex: number; colKey: string }>;
+    auditErrorRowIndices: number[];
+  } | null) => void;
   /** 数据体检：一键修复后更新新表数据（将脏数据置为 0 或空） */
   onHealthCheckFix?: (fixedNewRows: Record<string, string | null>[]) => void;
   /** 技能自我进化：更新已有 Skill */
@@ -515,7 +528,7 @@ function DiffPreviewCard({
             </span>
           </label>
         </div>
-        <div ref={scrollRef} className="diff-preview-scroll rounded-lg border border-gray-200 min-h-[120px] overflow-x-auto overflow-y-auto max-h-[400px]">
+        <div ref={scrollRef} className="diff-preview-scroll rounded-lg border border-gray-200 min-h-[120px] overflow-x-auto overflow-y-auto max-h-[400px]" style={{ display: 'none' }}>
           {filteredRows.length === 0 ? (
             <div className="flex items-center justify-center min-h-[120px] px-4 py-8 text-center">
               <p className="text-sm text-gray-500">✨ 所有数据均已对齐，无冲突或新增项。</p>
@@ -844,9 +857,18 @@ function AuditReportCard({
   const [editingCell, setEditingCell] = useState<{ rowIndex: number; colKey: string } | null>(null);
   const [editValue, setEditValue] = useState('');
 
+  const hasNoErrors = getAuditErrorCount(report) === 0;
   return (
     <motion.div {...stepTransition} className="flex flex-col gap-4">
-      {interruptFromSkill ? (
+      {hasNoErrors ? (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+          {interruptFromSkill ? (
+            <p className="text-sm font-medium text-emerald-800">已根据复用技能自动完成匹配，请在画布核对最终效果。</p>
+          ) : (
+            <p className="text-sm font-medium text-emerald-800">✅ 数据已完全对齐，请在画布确认预览效果。</p>
+          )}
+        </div>
+      ) : interruptFromSkill ? (
         <div className="rounded-xl border border-amber-300 bg-amber-50 p-4">
           <p className="text-sm font-medium text-amber-800">⚠️ 检测到 Skill 无法处理的异常数据，请先人工核对。</p>
           <p className="text-xs text-amber-700 mt-1">下方为审计发现的分类报错，修正后可继续合并。</p>
@@ -1080,6 +1102,8 @@ export function AgentSidebar({
   onBaselineCapture,
   onRequestReUpload,
   onHealthCheckDisplay,
+  onStagedCommit,
+  onStagedPreviewData,
   onHealthCheckFix,
   onUpdateSkill,
 }: AgentSidebarProps) {
@@ -1117,10 +1141,93 @@ export function AgentSidebar({
   useEffect(() => {
     if (task !== 'AUDIT_REPORT' && task !== 'HEALTH_CHECK') {
       onHealthCheckDisplay?.(null, [], [], []);
+      onStagedPreviewData?.(null);
       setShowAnomaliesOnCanvas(false);
       setAuditInterruptFromSkill(false);
     }
-  }, [task, onHealthCheckDisplay]);
+  }, [task, onHealthCheckDisplay, onStagedPreviewData]);
+
+  /** Full Join 全量预览：生成 stagedPreviewData 供画布展示，并建立 healthCheckMappedRows -> staged 行索引映射，重映射错误单元格 */
+  const pushStagedPreviewData = useCallback(() => {
+    if (task !== 'AUDIT_REPORT' || !healthCheckMappedRows.length || !healthReport) return;
+    const baseCols = Object.keys(baseRows[0] ?? {});
+    const mappedCols = Object.keys(healthCheckMappedRows[0] ?? {});
+    const extraCols = mappedCols.filter((c) => !baseCols.includes(c));
+    const newByProduct = new Map<string, Record<string, string | null>>();
+    for (const row of healthCheckMappedRows) {
+      const pn = String(row[ANCHOR_COLUMN] ?? '').trim();
+      if (pn) newByProduct.set(pn, row);
+    }
+    const baseProductNames = new Set(baseRows.map((r) => String(r[ANCHOR_COLUMN] ?? '').trim()).filter(Boolean));
+    const newProductNames = [...newByProduct.keys()];
+    const orphanOrder = newProductNames.filter((pn) => !baseProductNames.has(pn));
+    /** healthCheckMappedRows[i] -> staged result row index */
+    const mappedToStaged: number[] = [];
+    for (let i = 0; i < healthCheckMappedRows.length; i++) {
+      const pn = String(healthCheckMappedRows[i][ANCHOR_COLUMN] ?? '').trim();
+      if (baseProductNames.has(pn)) {
+        const baseIdx = baseRows.findIndex((r) => String(r[ANCHOR_COLUMN] ?? '').trim() === pn);
+        mappedToStaged[i] = baseIdx >= 0 ? baseIdx : -1;
+      } else {
+        const orphanIdx = orphanOrder.indexOf(pn);
+        mappedToStaged[i] = orphanIdx >= 0 ? baseRows.length + orphanIdx : -1;
+      }
+    }
+    const result: Record<string, string | null>[] = [];
+    const orphanIndices: number[] = [];
+    for (let i = 0; i < baseRows.length; i++) {
+      const baseRow = baseRows[i];
+      const pn = String(baseRow[ANCHOR_COLUMN] ?? '').trim();
+      const extraRow = newByProduct.get(pn);
+      const merged: Record<string, string | null> = {};
+      for (const c of baseCols) merged[c] = baseRow[c] ?? null;
+      for (const c of extraCols) merged[c] = extraRow?.[c] ?? null;
+      result.push(merged);
+    }
+    for (const pn of orphanOrder) {
+      const extraRow = newByProduct.get(pn) ?? {};
+      const orphan: Record<string, string | null> = {};
+      for (const c of baseCols) {
+        if (c === ANCHOR_COLUMN) {
+          orphan[c] = extraRow[ANCHOR_COLUMN] ?? pn;
+        } else {
+          orphan[c] = null;
+        }
+      }
+      for (const c of extraCols) orphan[c] = extraRow[c] ?? null;
+      orphanIndices.push(result.length);
+      result.push(orphan);
+    }
+    const remap = (cells: Array<{ rowIndex: number; colKey: string }>) =>
+      cells
+        .map((c) => {
+          const stagedIdx = mappedToStaged[c.rowIndex];
+          return stagedIdx >= 0 ? { rowIndex: stagedIdx, colKey: c.colKey } : null;
+        })
+        .filter((c): c is { rowIndex: number; colKey: string } => c != null);
+    const dirtyCells = remap(healthReport.dirtyCells);
+    const identityGapCells = remap(healthReport.identityGapCells);
+    const emptyCells = remap(healthReport.emptyCells);
+    const rowSet = new Set<number>();
+    [...dirtyCells, ...identityGapCells, ...emptyCells].forEach((c) => rowSet.add(c.rowIndex));
+    onStagedPreviewData?.({
+      rows: result,
+      baseColumns: baseCols,
+      extraColumns: extraCols,
+      orphanRowIndices: orphanIndices,
+      dirtyCells,
+      identityGapCells,
+      emptyCells,
+      auditErrorRowIndices: [...rowSet],
+    });
+  }, [task, baseRows, healthCheckMappedRows, healthReport, onStagedPreviewData]);
+
+  /** 进入 AUDIT 时推送 Full Join 数据（全时速预览，不依赖错误数）；healthReport 变化时重算 remapped cells */
+  useEffect(() => {
+    if (task === 'AUDIT_REPORT' && healthCheckMappedRows.length > 0 && healthReport) {
+      pushStagedPreviewData();
+    }
+  }, [task, healthCheckMappedRows, healthReport, pushStagedPreviewData]);
 
 
   /** 无 matchedSkill 时清空纠错记录 */
@@ -1374,11 +1481,9 @@ export function AgentSidebar({
         newMappedRows: mapped,
         anchorColumn: ANCHOR_COLUMN,
       });
-      const auditErrorCount = getAuditErrorCount(healthResult);
-      if (auditErrorCount > 0) {
-        setHealthReport(healthResult);
-        setHealthCheckMappedRows(mapped);
-      }
+      /** 全时速预览：无论是否有错误，都设置 healthReport 与 healthCheckMappedRows，进入 AUDIT 展示画布 */
+      setHealthReport(healthResult);
+      setHealthCheckMappedRows(mapped);
 
       const newCols = Object.entries(mapping)
         .filter(([, bc]) => bc === NEW_COLUMN_MARKER)
@@ -1456,8 +1561,8 @@ export function AgentSidebar({
       });
       setDiffSampleRows([...samples, ...sampleNewOnly, ...sampleDeleted]);
       setMergedPreview([]);
-      /** auditErrors.length > 0 严禁 PREVIEW，必须跳转 AUDIT_REPORT */
-      onTaskChange(auditErrorCount > 0 ? 'AUDIT_REPORT' : 'DIFF_PREVIEW');
+      /** 全时速预览：映射确认后一律进入 AUDIT_REPORT，画布展示 Full Join */
+      onTaskChange('AUDIT_REPORT');
       fetch(`${FINAL_API_URL}/ai-task`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1619,7 +1724,7 @@ export function AgentSidebar({
         addNewRows,
         expectedColumns: Object.keys(mapping),
       };
-      onSaveSkill(skill);
+      await Promise.resolve(onSaveSkill(skill));
       onTaskChange('IDLE');
     } finally {
       setLoading(false);
@@ -1686,88 +1791,16 @@ export function AgentSidebar({
       newMappedRows: mapped,
       anchorColumn: ANCHOR_COLUMN,
     });
-    if (hasBlockingIssues(healthResult)) {
-      setHealthReport(healthResult);
-      setHealthCheckMappedRows(mapped);
-      setAuditInterruptFromSkill(true);
-      setShowAnomaliesOnCanvas(true);
-      onHealthCheckDisplay?.(mapped, healthResult.dirtyCells, healthResult.identityGapCells, healthResult.emptyCells);
-      onTaskChange('AUDIT_REPORT');
-      return;
-    }
-
-    /** 变更提醒：技能应用时也捕获 baseline 并调用 change_detect */
+    /** Skills 模式拦截自动化终点：一律进入 AUDIT 供用户确认，严禁直接完成 */
+    setHealthReport(healthResult);
+    setHealthCheckMappedRows(mapped);
+    setAuditInterruptFromSkill(true);
+    setShowAnomaliesOnCanvas(hasBlockingIssues(healthResult));
     onBaselineCapture?.(baseRows);
-    const mappedColsSkill = Object.keys(mapped[0] ?? {});
-    const sharedCompareColsSkill = getSharedCompareColumns(BASE_COLUMNS, mappedColsSkill, ANCHOR_COLUMN);
-    fetch(`${FINAL_API_URL}/ai-task`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        task: 'change_detect',
-        baseline_rows: baseRows,
-        new_mapped_rows: mapped,
-        anchor_column: ANCHOR_COLUMN,
-        compare_columns: sharedCompareColsSkill,
-      }),
-    })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: ChangeReport | null) => {
-        if (data) setChangeReport(data);
-      })
-      .catch(() => {});
-
-    const newByProduct = new Map<string, Record<string, string | null>>();
-    for (const row of mapped) {
-      const pn = row[ANCHOR_COLUMN] ?? '';
-      if (pn) newByProduct.set(String(pn), row);
-    }
-    const baseProductNames = new Set(baseRows.map((r) => String(r[ANCHOR_COLUMN] ?? '')));
-    const newProductNames = new Set(newByProduct.keys());
-    const matchedRows: Array<{ baseRowIndex: number; productName: string }> = [];
-    const baseOnlyProductNames = new Set<string>();
-    for (let i = 0; i < baseRows.length; i++) {
-      const pn = String(baseRows[i][ANCHOR_COLUMN] ?? '');
-      if (newProductNames.has(pn)) matchedRows.push({ baseRowIndex: i, productName: pn });
-      else if (pn) baseOnlyProductNames.add(pn);
-    }
-    const newOnlyProducts = [...newProductNames].filter((p) => !baseProductNames.has(p));
-    const stats: DiffMatchStats = {
-      matchedCount: matchedRows.length,
-      newOnlyCount: newOnlyProducts.length,
-      baseOnlyCount: baseOnlyProductNames.size,
-      matchedRows,
-      newOnlyProducts,
-      baseOnlyProductNames: [...baseOnlyProductNames],
-    };
-    setDiffStats(stats);
-    const sampleMatched = matchedRows.slice(0, 5);
-    const samples = sampleMatched.map(({ baseRowIndex, productName }) => {
-      const baseRow = baseRows[baseRowIndex];
-      const newRow = newByProduct.get(productName) ?? {};
-      const after = { ...baseRow };
-      for (const [k, v] of Object.entries(newRow)) {
-        if (v != null) after[k] = v;
-      }
-      const hasChange = sharedCompareColsSkill.some((k) => sanitizeValue(baseRow?.[k]) !== sanitizeValue(after[k]));
-      return { before: baseRow ?? {}, after, productName, baseRowIndex, changeType: hasChange ? 'modified' as const : undefined };
-    });
-    const sampleNewOnly = newOnlyProducts.slice(0, 2).map((productName) => ({
-      before: {} as Record<string, string | null>,
-      after: newByProduct.get(productName) ?? {},
-      productName,
-      baseRowIndex: -1,
-      changeType: 'added' as const,
-    }));
-    const sampleDeleted = [...baseOnlyProductNames].slice(0, 1).map((productName) => {
-      const baseRow = baseRows.find((r) => String(r[ANCHOR_COLUMN] ?? '') === productName) ?? {};
-      return { before: baseRow, after: {} as Record<string, string | null>, productName, baseRowIndex: -2, changeType: 'deleted' as const };
-    });
-    setDiffSampleRows([...samples, ...sampleNewOnly, ...sampleDeleted]);
-    setMergedPreview([]);
-    onTaskChange('DIFF_PREVIEW');
-    onApplySkill?.(skill);
-  }, [baseRows, mergeSourceRows, mapNewRowsToBase, onTaskChange, onApplySkill, onBaselineCapture, onHealthCheckDisplay, onHealthCheckFix]);
+    onHealthCheckDisplay?.(mapped, healthResult.dirtyCells, healthResult.identityGapCells, healthResult.emptyCells);
+    onTaskChange('AUDIT_REPORT');
+    /** pushStagedPreviewData 由 useEffect 自动触发，画布立即展示 Full Join + #F0F7FF 合入列 */
+  }, [baseRows, mergeSourceRows, mapNewRowsToBase, onTaskChange, onBaselineCapture, onHealthCheckDisplay, onHealthCheckFix]);
 
   const handleApplySkill = async () => {
     if (!matchedSkill) return;
@@ -1941,7 +1974,7 @@ export function AgentSidebar({
                   nameMapping: Object.keys(nameMapping).length ? nameMapping : undefined,
                   historyFixes: deduped.length ? deduped : undefined,
                 };
-                onSaveSkill(skill);
+                await Promise.resolve(onSaveSkill(skill));
                 onTaskChange('IDLE');
               } finally {
                 setSkillEvolutionUpdating(false);
@@ -2082,6 +2115,8 @@ export function AgentSidebar({
             transitionToDiffPreviewFromAudit();
           }}
           onConfirmAndContinue={() => {
+            const committed = onStagedCommit?.();
+            if (committed) return;
             onHealthCheckDisplay?.(null, [], [], []);
             transitionToDiffPreviewFromAudit();
           }}

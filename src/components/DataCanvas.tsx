@@ -21,12 +21,20 @@ export type AITaskType = 'format_fix' | 'fill_missing' | 'summary_translate' | '
 export interface DataCanvasProps {
   rowData: Record<string, string | null>[] | any[];
   onDataChange?: (rows: any[]) => void;
+  /** 自定义列定义，用于 AUDIT 全量预览等场景 */
+  columns?: Array<{ field: string; headerName: string; isNewColumn?: boolean }>;
   /** 左侧联动：Agent 处理某列时高亮 */
   highlightedColumn?: string | null;
   /** 冲突行索引：画布滚动到该行 */
   conflictRowIndex?: number | null;
   /** 维度增强：本次合并新增的列名，表头浅蓝 + 新增维度标签 */
   newColumns?: string[];
+  /** 锚点列（如商品名称），用于关键列样式 */
+  anchorColumn?: string;
+  /** 是否为审计预览模式 */
+  isAuditPreview?: boolean;
+  /** 孤儿行索引，用于沉底样式 */
+  orphanRowIndices?: number[];
   /** 用户点击「查看变更详情」时临时高亮的单元格，null 表示不高亮 */
   highlightedConflictCells?: Array<{ rowIndex: number; colKey: string }> | null;
   /** 数据体检：乱码单元格，红色背景 */
@@ -121,7 +129,7 @@ function PendingIndicatorCellRenderer(props: {
   );
 }
 
-export default function DataCanvas({ rowData, onDataChange, highlightedColumn, conflictRowIndex, newColumns = [], highlightedConflictCells = null, highlightedDirtyCells = null, highlightedIdentityGapCells = null, highlightedEmptyCells = null, auditErrorRowIndices = null }: DataCanvasProps) {
+export default function DataCanvas({ rowData, onDataChange, columns: columnsProp, highlightedColumn, conflictRowIndex, newColumns = [], anchorColumn = '商品名称', isAuditPreview = false, orphanRowIndices = [], highlightedConflictCells = null, highlightedDirtyCells = null, highlightedIdentityGapCells = null, highlightedEmptyCells = null, auditErrorRowIndices = null }: DataCanvasProps) {
   const gridRef = useRef<AgGridReact>(null);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -149,6 +157,17 @@ export default function DataCanvas({ rowData, onDataChange, highlightedColumn, c
     if (!api) return;
     api.ensureIndexVisible(conflictRowIndex, 'middle');
   }, [conflictRowIndex]);
+
+  /** 审计高亮变化时强制刷新单元格样式（兼容虚拟滚动，在 DOM 复用后下一帧重算） */
+  useEffect(() => {
+    if (!highlightedDirtyCells?.length && !highlightedIdentityGapCells?.length && !highlightedEmptyCells?.length) return;
+    const api = gridRef.current?.api;
+    if (!api) return;
+    const raf = requestAnimationFrame(() => {
+      api.refreshCells({ force: true });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [highlightedDirtyCells, highlightedIdentityGapCells, highlightedEmptyCells]);
 
   useEffect(() => {
     if (rows.length === 0) return;
@@ -301,74 +320,53 @@ export default function DataCanvas({ rowData, onDataChange, highlightedColumn, c
 
   const columnDefs = useMemo<ColDef[]>(() => {
     const highlightClass = highlightedColumn ? 'ag-column-highlight' : '';
+    const orphanSet = new Set(orphanRowIndices);
+    const applyAudit = isAuditPreview;
+    const baseColDef = (field: string, headerName: string, isNewCol: boolean, isKeyCol: boolean): ColDef => ({
+      field,
+      headerName: isNewCol && applyAudit ? `🔗 ${headerName}` : isNewCol ? `${headerName} ✨ 新增维度` : headerName,
+      flex: 1,
+      minWidth: 100,
+      sortable: true,
+      filter: true,
+      editable: !applyAudit,
+      cellRenderer: field === '_empty' ? undefined : PendingIndicatorCellRenderer,
+      cellRendererParams: {},
+      headerClass: [
+        field === highlightedColumn ? highlightClass : '',
+        isNewCol && !applyAudit ? 'ag-header-new-column' : '',
+        applyAudit && isNewCol ? 'ag-audit-extra-col' : '',
+        applyAudit && isKeyCol ? 'ag-header-key-column' : '',
+      ].filter(Boolean).join(' ') || undefined,
+      cellClass: [
+        field === highlightedColumn ? highlightClass : '',
+        isNewCol ? 'ag-audit-extra-col' : '',
+        applyAudit && isKeyCol ? 'ag-cell-key-column' : '',
+      ].filter(Boolean).join(' ') || undefined,
+      cellClassRules: {
+        'ag-cell-price-changed': (p: { node?: { rowIndex?: number }; colDef?: { field?: string } }) =>
+          !!highlightedConflictCells?.length && highlightedConflictCells.some((c) => c.rowIndex === (p.node?.rowIndex ?? -1) && c.colKey === (p.colDef?.field ?? '')),
+        'ag-cell-audit-error': (p: { node?: { rowIndex?: number }; colDef?: { field?: string } }) => {
+          const ri = p.node?.rowIndex ?? -1;
+          const ck = p.colDef?.field ?? '';
+          return !!(highlightedDirtyCells?.some((c) => c.rowIndex === ri && c.colKey === ck) || highlightedIdentityGapCells?.some((c) => c.rowIndex === ri && c.colKey === ck) || highlightedEmptyCells?.some((c) => c.rowIndex === ri && c.colKey === ck));
+        },
+        'ag-cell-orphan-name': (p: { node?: { rowIndex?: number }; colDef?: { field?: string } }) =>
+          applyAudit && orphanSet.has(p.node?.rowIndex ?? -1) && p.colDef?.field === anchorColumn,
+      },
+    });
     const dataCols: ColDef[] = isPlaceholder
-      ? PLACEHOLDER_COLUMNS.map((field) => ({
-          field,
-          headerName: field,
-          flex: 1,
-          minWidth: 80,
-          sortable: true,
-          filter: true,
-          editable: true,
-          cellRenderer: PendingIndicatorCellRenderer,
-          cellRendererParams: {},
-          headerClass: field === highlightedColumn ? highlightClass : '',
-          cellClass: field === highlightedColumn ? highlightClass : '',
-        }))
-      : (() => {
-          const first = rows[0];
-          const keys =
-            typeof first === 'object' && first !== null
-              ? Object.keys(first).filter((k) => !DIFF_META_KEYS.has(k))
-              : [];
-          const newColSet = new Set(newColumns);
-          return keys.map((field) => {
-            const isNewCol = newColSet.has(field);
-            const headerClasses = [
-              field === highlightedColumn ? highlightClass : '',
-              isNewCol ? 'ag-header-new-column' : '',
-            ].filter(Boolean);
-            return {
-              field,
-              headerName: isNewCol ? `${field} ✨ 新增维度` : field,
-              flex: 1,
-              minWidth: 100,
-              sortable: true,
-              filter: true,
-              editable: true,
-              cellRenderer: field === '_empty' ? undefined : PendingIndicatorCellRenderer,
-              cellRendererParams: {},
-              headerClass: headerClasses.join(' ') || undefined,
-              cellClass: field === highlightedColumn ? highlightClass : '',
-              cellClassRules: {
-                /** 仅用户点击「查看变更详情」时，对 highlightedConflictCells 中的单元格临时标红 */
-                'ag-cell-price-changed': (params: {
-                  node?: { rowIndex?: number };
-                  colDef?: { field?: string };
-                }) => {
-                  if (!highlightedConflictCells?.length) return false;
-                  const rowIndex = params.node?.rowIndex ?? -1;
-                  const colKey = params.colDef?.field ?? '';
-                  return highlightedConflictCells.some((c) => c.rowIndex === rowIndex && c.colKey === colKey);
-                },
-                /** 审计：报错格子红色加粗边框 */
-                'ag-cell-audit-error': (params: {
-                  node?: { rowIndex?: number };
-                  colDef?: { field?: string };
-                }) => {
-                  const rowIndex = params.node?.rowIndex ?? -1;
-                  const colKey = params.colDef?.field ?? '';
-                  const isDirty = highlightedDirtyCells?.some((c) => c.rowIndex === rowIndex && c.colKey === colKey);
-                  const isGap = highlightedIdentityGapCells?.some((c) => c.rowIndex === rowIndex && c.colKey === colKey);
-                  const isEmpty = highlightedEmptyCells?.some((c) => c.rowIndex === rowIndex && c.colKey === colKey);
-                  return !!(isDirty || isGap || isEmpty);
-                },
-              },
-            };
-          });
-        })();
+      ? PLACEHOLDER_COLUMNS.map((f) => baseColDef(f, f, false, f === anchorColumn))
+      : columnsProp?.length
+        ? columnsProp.map((c) => baseColDef(c.field, c.headerName, !!c.isNewColumn, c.field === anchorColumn))
+        : (() => {
+            const first = rows[0];
+            const keys = typeof first === 'object' && first !== null ? Object.keys(first).filter((k) => !DIFF_META_KEYS.has(k)) : [];
+            const newColSet = new Set(newColumns);
+            return keys.map((field) => baseColDef(field, field, newColSet.has(field), field === anchorColumn));
+          })();
     return [ROW_NUM_COL_DEF, ...dataCols];
-  }, [rows, isPlaceholder, pendingChanges, highlightedColumn, newColumns, highlightedConflictCells, highlightedDirtyCells, highlightedIdentityGapCells, highlightedEmptyCells]);
+  }, [rows, isPlaceholder, columnsProp, highlightedColumn, newColumns, anchorColumn, isAuditPreview, orphanRowIndices, highlightedConflictCells, highlightedDirtyCells, highlightedIdentityGapCells, highlightedEmptyCells]);
 
   const defaultColDef = useMemo<ColDef>(
     () => ({
@@ -406,9 +404,11 @@ export default function DataCanvas({ rowData, onDataChange, highlightedColumn, c
             suppressContextMenu
             suppressNoRowsOverlay
             getRowClass={(params) => {
-              if (!auditErrorRowIndices?.length) return undefined;
               const idx = params.node?.rowIndex ?? -1;
-              return auditErrorRowIndices.includes(idx) ? 'ag-row-audit-error' : undefined;
+              const classes: string[] = [];
+              if (auditErrorRowIndices?.includes(idx)) classes.push('ag-row-audit-error');
+              if (isAuditPreview && orphanRowIndices.includes(idx)) classes.push('ag-row-orphan');
+              return classes.length ? classes.join(' ') : undefined;
             }}
             onCellContextMenu={handleCellContextMenu}
             onCellClicked={handleCellClicked}
